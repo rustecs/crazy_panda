@@ -1,0 +1,238 @@
+
+
+1. Удалить дубли из хеша
+my %h = (1=>1, 2=>2, 3=>2, 4=>4);
+
+my %ex = ();
+foreach ( keys %h )
+{
+  if (exists $ex{$_}) {delete $h{$_}}
+  else { $ex{$h{$_}}=''}
+}
+
+
+
+2. Аксессоры
+ООП не часто использовал в практике, ну допустим сделаем так
+package MyApp::Accessor;
+
+sub new 
+{
+        my $c = shift;
+        return bless {}, $c; 
+}
+
+sub AUTOLOAD 
+{
+ my ($self, $value) = @_; 
+ my $prop = $AUTOLOAD;
+ unless ( defined $value )
+   { return $self->{$prop} }
+ else
+   { $self->{$prop} = $value}
+}
+
+return 1
+
+
+
+3. Типы объявления переменных
+my - локальная переменная, 1 потому что будет пересоздаваться
+our - глобальная переменная , 1-10 потому что не будет создаваться повторно
+local - локальное переопределение, 1 потому что будет переопределять локально внешнюю переменную каждый раз
+state - изолированая переменная, 1-10 потому что будет хранить значение внутри функции
+my $var if 0; - никак не объясню: говнособенность языка depricated уже приличное время. 
+По идее инициализировать не должен, но он проинициализирует а вот андефайнить не станет
+
+
+4. Обработка данных из БД
+читать кусками из бд со смещением sort + limit/where + limit
+проблемы это изменения появившиеся в процессе итеративного чтения 
+для подстраховки можно воткнуть флаг а таблицу или сделать временную таблицу с маркерами обработанных записей
+но с удалением и апдейтом проблемы наверняка возникнут
+
+
+
+5. Поправить утечку памяти
+while (1) {
+my $a = {b => {}};
+$a->{b}{a} = $a; 
+
+undef $a->{b}{a}; покилять перекрестные ссылки после использования
+}
+
+что такое мягкие ссылки я не знаю
+
+
+6. Работа с памятью
+Память будет съедена скриптом так как переменная $a имеет ссылку на себя саму
+while (1) {
+my $a = {};
+$a->{func} = sub {
+$a->{cnt}++;
+};
+undef $a ; почистим переменную, можно извращаться с weaken а можно не создавать таких структур
+} 
+
+
+7.1 Синхронный
+use IO::Socket;
+$|++;
+sub http_get{
+	my ($host, $path, $query, $timeout) =@_;
+	my $qs = join '&', map {"$_=$$query{$_}"}keys %{$query};
+	my $q = "GET $path?$qs HTTP/1.0\r\nHost: $host\r\nUser-Agent: links\r\n\r\n\r\n";
+
+
+	my $sock = IO::Socket::INET->new(PeerAddr => $host,
+	PeerPort => 80,
+	Proto => 'tcp',
+	Timeout => $timeout ) || die "Problem while connect $!";
+	$sock->autoflush;
+
+	print $sock $q;
+	local $/ = undef;
+	$data =  <$sock>;
+	close ($sock);
+
+	if ( $data =~ /^HTTP\/[\d.]+ 200/m && $data =~ /^Content-Length: \d+/m )
+         {return 'ok' }
+	else
+	 { return 'bad'}
+
+
+}
+
+print http_get('www.ru','/',{aa=>11}, 20);
+
+
+
+
+
+
+7.2 Асинхронный
+асинхронность для Perl имхо излишество, потому аниивент почти не пользовал
+ну получилось такое себе ...
+
+use strict;
+use warnings;
+use 5.010;
+
+use AnyEvent;
+use AnyEvent::HTTP qw(http_request);
+
+my $cv = AnyEvent->condvar;
+my @ar = ();
+
+
+http_get("ya.ru", "/", {aa=>12}, 20);
+
+my $w = AnyEvent->idle( cb => sub { push @ar, 1});
+
+$cv->recv;
+
+printf("Array size: %d\n", scalar @ar);
+
+print "Over\n";
+
+
+sub http_get
+{
+ my ( $host, $path, $query, $timeout) = @_;
+ my $url = sprintf("http://%s%s?%s", $host, $path, join "&", map {"$_=$$query{$_}"} keys %{$query});
+
+ print "Get $url \n";
+ $cv->begin;
+
+ http_request 
+  GET => $url,
+  headers => { "User-Agent" => "links"},
+  timeout => $timeout,
+  sub 
+   {
+    my ($body, $head) = @_;
+    print $head->{Status}, "\n";
+    $cv->end;
+   };
+
+}
+
+
+
+
+8. Наследование
+опять же ООП не моя сильная сторона, и как вызвать все не меняя структуры наследования
+мне не понятно, как и задание - вызвать все методы
+но в порядке бреда допустим так
+
+package DD;
+
+use parent qw/ BB CC /;
+
+sub func { print "DD\n";
+my $self = shift;
+for my $class (@ISA) {
+ my $meth = $class . "::func";
+ $self->$meth(@_);
+ 
+ }
+}
+
+
+
+
+9. Как улучшить алгоритм половинного деления, тоже не знаю ...
+ 
+
+use Benchmark;
+
+
+print "Array test";
+my $v;
+my @ar = map { $v+=int(rand(10)); $v} 1..1000000;
+
+#print join ',', @ar;
+
+my $sv = int(rand(3000000));
+
+my $id = get_close_value($sv);
+print " Closest to $sv is $ar[$id] at position $id\n";
+print "Prev: ",$ar[$id-1], " Post: ", $ar[$id+1],"\n";
+
+
+timethese(-5, {
+        div2 => get_close_value($sv),
+});
+
+
+
+sub get_close_value
+{
+ my $v = shift;
+ my $size = scalar @ar;
+ my ($fp, $lp) = (0, $size-1);
+ my $iter = 0;
+ 
+ my $prem = 0; 
+ while ( $iter < 1000 )
+ {
+  my $m = get_middle( $fp, $lp);
+  if ( $m == $prem ) { print "Not exact but close\n"; return $m; };
+  $prem = $m;
+  if ( $ar[$m] > $v ) { $lp = $m }
+  elsif ( $ar[$m] < $v ) { $fp = $m}
+  else {return $m};
+  ++$iter;
+ }
+ print "This code is not work\n";
+ return;
+}
+
+sub get_middle
+{
+ return int(($_[0]+$_[1])/2);
+}
+
+
+
+
